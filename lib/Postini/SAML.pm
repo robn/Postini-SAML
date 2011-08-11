@@ -13,7 +13,11 @@ use Digest::SHA1 qw( sha1 );
 use Carp qw( croak );
 
 # Postini SAML ACS
-my $ACS_URI = 'https://pfs.postini.com/pfs/spServlet';
+my $ACS_URL = 'https://pfs.postini.com/pfs/spServlet';
+
+sub get_acs_url {
+    return $ACS_URL;
+}
 
 sub new {
     my ($class, $arg) = @_;
@@ -223,7 +227,7 @@ sub _response_xml {
 
                 'IssueInstant' => $issue_instant,
                 'ResponseID'   => $response_id,
-                'Recipient'    => $ACS_URI,
+                'Recipient'    => $ACS_URL,
             },
 
             # include the signature if its available. if not then it wil be
@@ -307,9 +311,9 @@ sub get_form {
     my $saml_response = encode_base64( $self->get_response_xml( $mail ), q{} );
 
     my $html = join( q{},
-        qq{<form action="$ACS_URI" method="post">},
+        qq{<form action="$ACS_URL" method="post">},
         qq{<input type="hidden" name="SAMLResponse" value="$saml_response" />},
-        qq{<input type="hidden" name="TARGET" value="$ACS_URI" />},
+        qq{<input type="hidden" name="TARGET" value="$ACS_URL" />},
         qq{<input type="submit" name="Submit" value="Submit" />},
         qq{</form>},
     );
@@ -321,7 +325,191 @@ __END__
 
 =head1 NAME
 
-Postini::SAML - Do SAML login to Google Postini services
+Postini::SAML - Do SAML-based sign-in to Postini services
+
+=head1 SYNOPSIS
+
+    use Postini::SAML;
+
+    # setup keys and certificates
+    my $saml = Postini::SAML->new({
+        keyfile  => 'postini.key',
+        certfile => 'postini.crt',
+        issuer   => 'example.com',
+    });
+
+    # get a signed SAML response that will sign in the given user
+    my $response_xml = $saml->get_response_xml('user@example.com');
+ 
+    # quick and dirty HTML form for testing
+    print $saml->get_form('user@example.com');
+
+=head1 DESCRIPTION
+
+L<Postini::SAML> creates signed SAML responses suitable for signing your users
+into Postini services (aka "Google Message Security" and/or "Google Message
+Discovery").
+
+It is not a complete SAML implementation or SSO solution. It implements just
+enough of the SAML spec to get you into Postini. The author is not an expert
+on SAML, XML or security in general. Don't be afraid though; this module does
+work and is production use at at least one site :)
+
+Postini offers two modes of operation for SAML SSO - "push" (or "post") and
+"pull" (or "artifact). This modules implements the push model.
+
+The typical SAML flow for Postini is slightly different to a standard SAML
+flow in that it is not initiated on the Postini side. Instead you need to set
+up a sign-in page on your website or application server and direct your users
+to it. The flow is as follows:
+
+=over 4
+
+=item *
+
+User accesses a web page that you provide. If they are not already identified
+(signed in), they work through some sign-in process.
+
+=item *
+
+Page uses L<Postini::SAML> to generate a HTML form containing the signed
+response with the user's Postini username (email address). The form target is
+the Postini ACS URL.
+
+=item *
+
+User submits the form (either explicitly or implicitly eg via Javascript) to
+Postini.
+
+=item *
+
+Postini verifies the signature and if valid, signs the user in.
+
+=back
+
+See the discussion of L</get_form> for information on how to generate your own
+form.
+
+=head1 SETUP
+
+Before you use this module its necessary to have SSO configured for your
+Postini organisation. The Postini docs are a bit thin on what you need to do.
+A full explanation is well outside the scope of this document, but here's list
+of things you should have in place before trying to use this module:
+
+=over 4
+
+=item *
+
+Create a certificate and key pair.
+
+=item *
+
+Upload the certificate/public key to Postini. Set an appropriate value for the
+issuer (typically your domain name).
+
+=item *
+
+Enable SSO login for one or more of your user organisations. Make sure you
+keep at least one admin user in another organisation that uses password login,
+otherwise you may find you can't get back in if something goes wrong.
+
+=back
+
+=head1 CONSTRUCTOR
+
+    my $saml = Postini::SAML->new({
+        keyfile  => 'postini.key',
+        certfile => 'postini.crt',
+        issuer   => 'example.com',
+    });
+
+Creates an object that can produce SAML responses. You need to provide three arguments:
+
+=over 4
+
+=item keyfile
+
+Name of file containing the private key in PEM format.
+
+=item certfile
+
+Name of file containing the certificate in PEM format.
+
+=item issuer
+
+The issuer attached to this certificate in the Postini configuration.
+
+=back
+
+=head1 METHODS
+
+=head2 get_response_xml
+
+    my $response_xml = $saml->get_response_xml('user@example.com');
+
+Create a signed SAML response document that, when submitted to the Postini ACS
+URL, will sign in the specified user. The response is valid for 60 seconds and
+so should be returned to the user for submission immediately.
+
+=head2 get_form
+
+    print $saml->get_form('user@example.com');
+
+Creates a basic HTML form that, when submitted, will sign in the specified
+user. This is provided for testing purposes only. While you could use it as
+part of a larger page you're probably better to make something tailored to
+your environment.
+
+To submit the SAML response to Postini you need to perform a HTTP POST to the
+ACS URL, which can be obtained using L</get_acs_url>. The request takes two
+arguments:
+
+=over 4
+
+=item SAMLResponse
+
+The Base64-encoded response XML returned by L</get_response_xml>.
+
+=item TARGET
+
+The Postini ACS URL, obtained using L</get_acs_url>.
+
+=back
+
+=head2 get_acs_url
+
+    my $acs_url = $saml->get_acs_url;
+
+Get the ACS URL to submit the SAML response document to. The is hardcoded to
+C<https://pfs.postini.com/pfs/spServlet>.
+
+=head1 BUGS
+
+None known. Please report bugs via the CPAN Request Tracker at
+L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=Postini-SAML>
+
+=head1 FEEDBACK
+
+If you find this module useful, please consider rating it on the CPAN Ratings
+service at L<http://cpanratings.perl.org/rate?distribution=Postini-SAML>.
+
+If you like (or hate) this module, please tell the author! Send mail to
+E<lt>rob@eatenbyagrue.orgE<gt>.
+
+=head1 SEE ALSO
+
+L<Google::SAML::Response>
+
+=head1 AUTHOR
+
+Robert Norris E<lt>rob@eatenbyagrue.orgE<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (c) 2011 Monash University.
+
+This module is free software, you can redistribute it and/or modify it under the same terms as Perl itself.
 
 =cut
 
